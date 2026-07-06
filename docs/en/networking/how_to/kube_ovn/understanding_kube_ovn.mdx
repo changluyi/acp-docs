@@ -46,6 +46,16 @@ Multiple instances of `ovn-central` will synchronize data via the Raft protocol 
 `ovs-ovn` runs as a DaemonSet on each node, with `openvswitch`, `ovsdb`, and `ovn-controller` running inside the Pod.
 These components act as agents for `ovn-central` to translate logical flow tables into real network configurations.
 
+:::tip Resource limits
+On large clusters, the `openvswitch` container in the `ovs-ovn` DaemonSet can outgrow its default resources. Memory pressure gets the container `OOMKilled` (the Pod restarts with exit code 137); CPU pressure shows up as throttling — slow `ovn-controller` convergence and forwarding latency rather than a restart. When you see either, raise the relevant limits:
+
+```bash
+kubectl edit ds ovs-ovn -n kube-system
+```
+
+In the `openvswitch` container's `resources` block, raise `limits.memory` / `limits.cpu` (and the matching `requests`). For a long-lived cluster, set the same values under `ovs-ovn.resources` in the kube-ovn Helm values so the changes survive upgrades.
+:::
+
 ## Core Controller and Agent
 
 This part is the core component of Kube-OVN, serving as a bridge between OVN and Kubernetes, bridging the two systems and translating network concepts between them.
