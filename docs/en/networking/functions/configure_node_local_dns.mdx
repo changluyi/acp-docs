@@ -16,6 +16,17 @@ NodeLocal DNSCache is a cluster plugin that improves cluster DNS performance by 
 ## Important Notes
 
 :::warning
+**Production usage risk**
+
+NodeLocal DNSCache changes the DNS path of newly created Pods on each node. Before enabling it in a production cluster, evaluate the following risks:
+
+- NodeLocal DNSCache uses a local health check port on every node. The default health check port is `8080`, which is commonly used by business workloads.
+- If the node-local DNS Pod on a node is unavailable, DNS resolution for Pods on that node can fail. The traffic does not automatically fail over to CoreDNS unless the Pod resolver is configured with an additional DNS server and the resolver implementation retries the next server.
+
+Use this plugin in test or pre-production environments first. For production environments, confirm the port usage, monitoring, alerting, and emergency recovery plan before enabling the plugin.
+:::
+
+:::warning
 **Deployment Considerations:**
 
 1. **Kube-OVN Underlay Mode**: The plugin does not support deployment in Kube-OVN Underlay mode. If deployed, it may cause DNS query failures.
@@ -86,6 +97,61 @@ Pod → NodeLocal DNSCache → [Cache Hit] → Pod
 ```
 
 ## Configuration
+
+### Default Health Check Port
+
+NodeLocal DNSCache runs a `node-cache` process on each node. The process exposes a health check endpoint on port `8080` by default. The current plugin package does not provide an installation parameter to change this health check port.
+
+Before installing the plugin, check whether port `8080` is already used on each node:
+
+```bash
+ss -ltnp | grep ':8080'
+```
+
+If port `8080` is already used by a workload on the node, choose one of the following approaches:
+
+- Move the workload to another port before installing NodeLocal DNSCache.
+- Deploy the workload without binding to `0.0.0.0:8080` or `127.0.0.1:8080` on the node.
+- If the port must be changed for NodeLocal DNSCache, contact Alauda support to confirm whether your target version provides a supported configuration method.
+
+Avoid manually editing the generated ConfigMap or DaemonSet as a long-term solution. Manual changes can be overwritten when the plugin is upgraded, reinstalled, or reconciled by the platform.
+
+### DNS Availability Risk
+
+After NodeLocal DNSCache takes effect, newly created Pods use the node-local DNS address as their DNS server. If the `node-cache` Pod on a node is unavailable, for example during a crash, eviction, image pull failure, or plugin upgrade, Pods on that node can fail to resolve DNS names.
+
+To reduce the operational risk:
+
+- Monitor the NodeLocal DNSCache DaemonSet and alert when any `node-cache` Pod is not Ready.
+- Plan a maintenance window for plugin upgrades because DNS resolution on a node can be affected while the node-local DNS Pod is unavailable.
+- In an emergency, restore kubelet `cluster-dns` to the CoreDNS ClusterIP and recreate affected Pods so that their `/etc/resolv.conf` is regenerated.
+
+### Optional: Configure Multiple DNS Servers
+
+Kubelet supports multiple `cluster-dns` addresses. You can configure the CoreDNS ClusterIP as a secondary DNS server so that new Pods receive both DNS servers in `/etc/resolv.conf`.
+
+Example:
+
+```yaml
+cluster-dns: "169.254.20.10,10.96.0.10"
+```
+
+In this example, `169.254.20.10` is the NodeLocal DNSCache IP address and `10.96.0.10` is the CoreDNS ClusterIP. Replace both values with the addresses used by your cluster.
+
+This configuration can reduce the impact of a node-local DNS failure, but it is not a no-impact failover mechanism:
+
+- The failover behavior depends on the resolver implementation in the workload image. For example, the glibc resolver typically tries the next nameserver only after the current one times out, so DNS resolution can become slower during a failure. musl libc, which is used by Alpine Linux, can query multiple nameservers in parallel and may fail over faster.
+- Resolver options such as `timeout` and `attempts` also affect the failure delay.
+- If NetworkPolicy is enabled, allow Pods to access both the NodeLocal DNSCache IP address and the CoreDNS ClusterIP on TCP and UDP port `53`.
+
+Validation in an IPv4 cluster showed the following behavior when the node-local DNS process on the workload node was stopped:
+
+- A Pod with only the NodeLocal DNSCache IP address in `/etc/resolv.conf` failed to resolve DNS names.
+- A Pod with both the NodeLocal DNSCache IP address and the CoreDNS ClusterIP in `/etc/resolv.conf` could resolve DNS names through CoreDNS.
+- With the default glibc resolver behavior, failover to CoreDNS can take several seconds because the resolver waits for the first nameserver to time out.
+- With musl libc, such as in Alpine Linux images, DNS queries can be sent to multiple nameservers in parallel, so failover can be faster.
+
+If your cluster is upgraded by rebuilding nodes, add the multi-address `cluster-dns` value to each `kubeletExtraArgs` location described in the **Important Notes** section.
 
 ### Network Policy Configuration
 
