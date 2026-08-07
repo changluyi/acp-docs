@@ -131,7 +131,13 @@ To reduce the operational risk:
 
 - Monitor the NodeLocal DNSCache DaemonSet and alert when any `node-cache` Pod is not Ready.
 - Plan a maintenance window for plugin upgrades because DNS resolution on a node can be affected while the node-local DNS Pod is unavailable.
-- In an emergency, restore kubelet `cluster-dns` to the CoreDNS ClusterIP and recreate affected Pods so that their `/etc/resolv.conf` is regenerated.
+- **Emergency recovery**: If DNS resolution on a node fails because the `node-cache` Pod is unavailable, restore kubelet `cluster-dns` to the CoreDNS ClusterIP and recreate the affected Pods so that their `/etc/resolv.conf` is regenerated. The CoreDNS ClusterIP is the `ClusterIP` of the DNS Service in the `kube-system` namespace. To find it:
+
+  ```bash
+  kubectl get svc -n kube-system
+  ```
+
+  Look for the DNS Service (commonly named `kube-dns` or `coredns`) and use its `ClusterIP`.
 
 ### Optional: Configure Multiple DNS Servers
 
@@ -143,7 +149,7 @@ Example:
 cluster-dns: "169.254.20.10,10.96.0.10"
 ```
 
-In this example, `169.254.20.10` is the NodeLocal DNSCache IP address and `10.96.0.10` is the CoreDNS ClusterIP. Replace both values with the addresses used by your cluster.
+In this example, `169.254.20.10` is the NodeLocal DNSCache IP address and `10.96.0.10` is the CoreDNS ClusterIP. Replace both values with the addresses used by your cluster. To find the CoreDNS ClusterIP, run `kubectl get svc -n kube-system` and use the `ClusterIP` of the DNS Service (commonly named `kube-dns` or `coredns`).
 
 This configuration can reduce the impact of a node-local DNS failure, but it is not a no-impact failover mechanism:
 
