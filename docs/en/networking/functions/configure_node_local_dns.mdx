@@ -24,15 +24,17 @@ Use NodeLocal DNSCache cautiously in production or production-like clusters. Bef
 
 2. **Kubelet Restart**: Deploying this plugin will cause the kubelet to restart.
 
-3. **Host Port 8080 Usage**: The `node-cache` container uses `hostNetwork: true` and listens on `127.0.0.1:8080` for its health endpoint. This can conflict with node-level services or workloads that use `hostNetwork` or `hostPort` and bind `127.0.0.1:8080` or `0.0.0.0:8080`.
+3. **Host Port 8080 Usage**: The `node-cache` container uses `hostNetwork: true` and listens on the NodeLocal DNSCache IP, for example `169.254.20.10:8080`, for its health endpoint. This can conflict with node-level services or workloads that use `hostNetwork` or `hostPort` and bind the same address or `0.0.0.0:8080`. The current plugin installation page does not expose a parameter to change this health check port. If this risk is not acceptable, avoid enabling NodeLocal DNSCache for the affected workloads or use a support-guided temporary workaround.
 
-4. **Node-Level DNS Availability**: After the plugin takes effect, Pods on a node use the local NodeLocal DNSCache endpoint for DNS resolution. If the NodeLocal DNSCache Pod on that node crashes, is evicted, cannot pull its image, or is restarted during an upgrade, DNS resolution for all Pods on that node may fail. Pods do not automatically fall back to CoreDNS.
+4. **Node-Level DNS Availability**: After the plugin takes effect, Pods on a node use the local NodeLocal DNSCache endpoint for DNS resolution. If the NodeLocal DNSCache Pod on that node crashes, is evicted, cannot pull its image, or is restarted during an upgrade, DNS resolution for all Pods on that node may fail. Configuring CoreDNS as an additional DNS server can provide a fallback path, but it is not transparent failover. Some libc resolvers may wait for timeout across multiple `search` queries before using the next DNS server; tuning resolver `timeout` and `attempts` can reduce the delay but also reduces tolerance for transient DNS latency.
 
-5. **Pod Restart Required**: After the plugin is successfully deployed, it will not affect running Pods, but will only take effect on newly created Pods. When the CNI is Kube-OVN, you need to manually add the parameter "--node-local-dns-ip=(IP address of the local DNS cache server)" to the kube-ovn-controller.
+5. **Metrics Collection**: The `node-cache` metrics endpoint may be bound to the NodeLocal DNSCache IP, for example `169.254.20.10:9253`. External monitoring paths that access metrics through the node IP may not be able to collect these metrics. The current plugin installation page does not expose a parameter to change the metrics listen address.
 
-6. **NetworkPolicy Configuration**: If NetworkPolicy is configured in the cluster, you need to additionally allow both from and to directions for the node CIDR and nodeLocalDNSIP in the networkPolicy to ensure proper communication.
+6. **Pod Restart Required**: After the plugin is successfully deployed, it will not affect running Pods, but will only take effect on newly created Pods. When the CNI is Kube-OVN, you need to manually add the parameter "--node-local-dns-ip=(IP address of the local DNS cache server)" to the kube-ovn-controller.
 
-7. **Cluster Upgrade via Rebuilding**: If the cluster is upgraded by rebuilding nodes (re-provisioning), kubelet configuration changes will be lost. To make the NodeLocal DNS configuration persistent across upgrades, you need to add the `--cluster-dns` parameter to `kubeletExtraArgs` in the following three places of the cluster template:
+7. **NetworkPolicy Configuration**: If NetworkPolicy is configured in the cluster, you need to additionally allow both from and to directions for the node CIDR and nodeLocalDNSIP in the networkPolicy to ensure proper communication.
+
+8. **Cluster Upgrade via Rebuilding**: If the cluster is upgraded by rebuilding nodes (re-provisioning), kubelet configuration changes will be lost. To make the NodeLocal DNS configuration persistent across upgrades, you need to add the `--cluster-dns` parameter to `kubeletExtraArgs` in the following three places of the cluster template:
    - `KubeadmControlPlane` → `initConfiguration` → `nodeRegistration` → `kubeletExtraArgs`
    - `KubeadmControlPlane` → `joinConfiguration` → `nodeRegistration` → `kubeletExtraArgs`
    - `KubeadmConfigTemplate` → `template` → `spec` → `joinConfiguration` → `nodeRegistration` → `kubeletExtraArgs`
